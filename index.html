@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Absensi SMA Alfadllu 4 Brebes</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Library untuk Generate QR Code -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+      .tab-active {
+        border-bottom: 4px solid #2563eb;
+        color: #2563eb;
+        font-weight: bold;
+      }
+      .tab-inactive {
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 font-sans text-gray-800">
+    <script>
+      // ==========================================
+      // MASUKKAN URL GOOGLE APPS SCRIPT ANDA DISINI
+      // ==========================================
+      const GOOGLE_SHEET_URL = "MASUKKAN_URL_WEB_APP_ANDA_DISINI";
+
+      let jamMasuk = localStorage.getItem("jamMasuk") || "07:00";
+      let batasTelat = localStorage.getItem("batasTelat") || "07:30";
+      let jamPulang = localStorage.getItem("jamPulang") || "14:00";
+      let kodeHariIni = "";
+
+      const namaHariArray = [
+        "Minggu",
+        "Senin",
+        "Selasa",
+        "Rabu",
+        "Kamis",
+        "Jumat",
+        "Sabtu",
+      ];
+      let hariIni = namaHariArray[new Date().getDay()];
+
+      // Generate Kode Unik Otomatis Berdasarkan Hari & Tanggal
+      function getDailyCode() {
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, "0");
+        const mm = String(now.getMonth() + 1).padStart(2, "0");
+        const yyyy = now.getFullYear();
+        const dateStr = `${dd}${mm}${yyyy}`;
+
+        const hariCaps = hariIni.toUpperCase();
+        const hash = (
+          now.getDate() * 7 +
+          (now.getMonth() + 1) * 13 +
+          now.getFullYear()
+        )
+          .toString(36)
+          .toUpperCase();
+
+        return `ALFADLLU-${hariCaps}-${dateStr}-${hash}`;
+      }
+
+      // Fungsi Pindah Tab & Keamanan Admin
+      function showTab(tabName) {
+        if (tabName === "admin") {
+          const password = prompt(
+            "LOCKED: Masukkan Password Admin untuk mengakses panel ini:",
+          );
+          if (password !== "admin123") {
+            alert("Password salah! Akses ditolak.");
+            return;
+          }
+        }
+
+        document.getElementById("tab-guru").classList.add("hidden");
+        document.getElementById("tab-admin").classList.add("hidden");
+        document.getElementById("btn-guru").className =
+          "w-1/2 py-4 text-center cursor-pointer tab-inactive";
+        document.getElementById("btn-admin").className =
+          "w-1/2 py-4 text-center cursor-pointer tab-inactive";
+
+        document.getElementById("tab-" + tabName).classList.remove("hidden");
+        document.getElementById("btn-" + tabName).className =
+          "w-1/2 py-4 text-center cursor-pointer tab-active";
+      }
+
+      // Otomatis isi kolom input barcode saat tombol diklik
+      function pakaiKodeOtomatis() {
+        document.getElementById("guru-barcode").value = kodeHariIni;
+      }
+
+      // Fungsi Submit Absen ke Google Sheets
+      async function submitAbsen(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById("btn-submit");
+        const info = document.getElementById("submit-info");
+
+        const nama = document
+          .getElementById("guru-nama")
+          .value.trim()
+          .toUpperCase();
+        const status = document.getElementById("guru-status").value;
+        const barcode = document.getElementById("guru-barcode").value.trim();
+        const keterangan = document
+          .getElementById("guru-keterangan")
+          .value.trim();
+
+        // Validasi Barcode (Khusus Hadir)
+        if (status === "Hadir" && barcode !== kodeHariIni) {
+          alert(
+            `Kode Barcode salah atau sudah kadaluarsa! Silakan klik tombol "Gunakan Kode Hari Ini" yang menampilkan hari ${hariIni.toUpperCase()}.`,
+          );
+          return;
+        }
+
+        // Hitung Telat / Tepat Waktu
+        let kategori = "-";
+        let now = new Date();
+        let jam = String(now.getHours()).padStart(2, "0");
+        let menit = String(now.getMinutes()).padStart(2, "0");
+        let waktuSekarang = `${jam}:${menit}`;
+
+        if (status === "Hadir") {
+          if (waktuSekarang <= batasTelat) kategori = "Tepat Waktu";
+          else if (waktuSekarang > batasTelat && waktuSekarang < jamPulang)
+            kategori = "Telat";
+          else kategori = "Absen Pulang";
+        }
+
+        const payload = {
+          action: "absen",
+          tanggal: `${hariIni}, ${now.toLocaleDateString("id-ID")}`, // Format: Senin, 20/11/2026
+          waktu: waktuSekarang,
+          nama: nama,
+          status: status,
+          keterangan: keterangan,
+          barcode: status === "Hadir" ? barcode : "-",
+          kategori_telat: kategori,
+        };
+
+        btn.disabled = true;
+        btn.innerText = "Mengirim Data...";
+        info.innerText = "Mohon tunggu, sedang mengirim absensi...";
+
+        try {
+          const response = await fetch(GOOGLE_SHEET_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(payload),
+          });
+
+          const result = await response.json();
+          if (result.status === "success") {
+            alert(
+              `Absen Berhasil!\nNama: ${nama}\nHari: ${hariIni}\nStatus: ${status}\nKategori: ${kategori}`,
+            );
+            document.getElementById("form-absen").reset();
+            document.getElementById("box-barcode").style.display = "block";
+          } else {
+            alert("Gagal mengirim data. Silakan coba lagi.");
+          }
+        } catch (error) {
+          alert(
+            "Terjadi kesalahan jaringan. Pastikan internet aktif dan URL Google Script sudah benar.",
+          );
+        } finally {
+          btn.disabled = false;
+          btn.innerText = "✅ Kirim Kehadiran";
+          info.innerText = "";
+        }
+      }
+
+      window.onload = () => {
+        // 1. Cek Hari Dinas (Senin - Sabtu)
+        if (hariIni === "Minggu") {
+          document.getElementById("area-absen").classList.add("hidden");
+          document.getElementById("info-libur").classList.remove("hidden");
+        } else {
+          document.getElementById("nama-hari-tampil").innerText =
+            hariIni.toUpperCase();
+
+          // 2. Generate & Tampilkan QR Code otomatis
+          kodeHariIni = getDailyCode();
+          document.getElementById("display-kode-teks").innerText = kodeHariIni;
+          new QRCode(document.getElementById("qrcode-guru"), {
+            text: kodeHariIni,
+            width: 160,
+            height: 160,
+            colorDark: "#1e3a8a",
+            colorLight: "#ffffff",
+          });
+        }
+
+        // 3. Load settingan jam di Admin
+        document.getElementById("set-masuk").value = jamMasuk;
+        document.getElementById("set-telat").value = batasTelat;
+        document.getElementById("set-pulang").value = jamPulang;
+      };
+    </script>
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md text-center">
+      <h1 class="text-xl md:text-2xl font-bold">
+        ABSENSI SMA ALFADLLU 4 BREBES
+      </h1>
+      <p class="text-sm text-blue-200">SEMESTER 2 - T.A 2026/2027</p>
+    </header>
+
+    <!-- Navigasi -->
+    <nav class="flex bg-white shadow mb-6 max-w-3xl mx-auto">
+      <div
+        id="btn-guru"
+        onclick="showTab('guru')"
+        class="w-1/2 py-4 text-center cursor-pointer tab-active"
+      >
+        DASHBOARD GURU
+      </div>
+      <div
+        id="btn-admin"
+        onclick="showTab('admin')"
+        class="w-1/2 py-4 text-center cursor-pointer tab-inactive flex justify-center items-center gap-1"
+      >
+        <span>🔒 ADMIN PANEL</span>
+      </div>
+    </nav>
+
+    <main class="max-w-3xl mx-auto px-4 pb-12">
+      <!-- HALAMAN GURU -->
+      <div id="tab-guru" class="bg-white p-6 rounded-lg shadow-md">
+        <!-- INFO LIBUR HARI MINGGU (Default disembunyikan) -->
+        <div
+          id="info-libur"
+          class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-6 rounded-lg text-center mb-6 shadow-sm"
+        >
+          <h3 class="text-xl font-bold mb-2">🛑 HARI INI LIBUR</h3>
+          <p>
+            Hari ini adalah hari <b>MINGGU</b>. Sistem absensi digital sedang
+            ditutup. Sampai jumpa besok hari Senin!
+          </p>
+        </div>
+
+        <!-- AREA ABSENSI (Hanya tampil Senin - Sabtu) -->
+        <div id="area-absen">
+          <!-- KOTAK QR CODE OTOMATIS -->
+          <div
+            class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-center shadow-inner"
+          >
+            <div
+              class="bg-blue-600 text-white inline-block px-6 py-1 rounded-full text-sm font-bold tracking-widest mb-4 shadow-md"
+            >
+              📅 DINAS HARI: <span id="nama-hari-tampil"></span>
+            </div>
+
+            <div class="flex justify-center mb-3">
+              <div
+                id="qrcode-guru"
+                class="p-2 bg-white rounded-lg shadow-sm border border-blue-100"
+              ></div>
+            </div>
+            <p
+              id="display-kode-teks"
+              class="font-mono font-bold text-gray-800 text-sm md:text-base mb-3 tracking-wide break-all px-2"
+            ></p>
+            <button
+              type="button"
+              onclick="pakaiKodeOtomatis()"
+              class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-6 rounded-full shadow transition transform hover:scale-105"
+            >
+              📋 Gunakan Kode Hari Ini
+            </button>
+          </div>
+
+          <h2 class="text-xl font-bold mb-4 text-gray-800 border-b pb-2">
+            Form Absensi Harian
+          </h2>
+          <form id="form-absen" onsubmit="submitAbsen(event)" class="space-y-4">
+            <div>
+              <label class="block font-semibold mb-1 text-sm"
+                >Nama Lengkap Guru</label
+              >
+              <input
+                type="text"
+                id="guru-nama"
+                required
+                placeholder="Ketik nama lengkap Anda..."
+                class="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase"
+              />
+            </div>
+
+            <div>
+              <label class="block font-semibold mb-1 text-sm"
+                >Status Kehadiran</label
+              >
+              <select
+                id="guru-status"
+                required
+                class="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500"
+                onchange="
+                  document.getElementById('box-barcode').style.display =
+                    this.value === 'Hadir' ? 'block' : 'none'
+                "
+              >
+                <option value="Hadir">Hadir</option>
+                <option value="Izin">Izin</option>
+                <option value="Sakit">Sakit</option>
+                <option value="Alfa">Tanpa Keterangan / Alfa</option>
+              </select>
+            </div>
+
+            <!-- INPUT BARCODE -->
+            <div id="box-barcode">
+              <label class="block font-semibold mb-1 text-sm"
+                >Kode Barcode Kehadiran</label
+              >
+              <input
+                type="text"
+                id="guru-barcode"
+                placeholder="Klik tombol 'Gunakan Kode Hari Ini' di atas"
+                class="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500 bg-gray-50 font-mono"
+              />
+            </div>
+
+            <div>
+              <label class="block font-semibold mb-1 text-sm"
+                >Keterangan (Wajib diisi jika Izin/Sakit)</label
+              >
+              <textarea
+                id="guru-keterangan"
+                rows="2"
+                placeholder="Tulis alasan jika izin/sakit..."
+                class="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500"
+              ></textarea>
+            </div>
+
+            <button
+              type="submit"
+              id="btn-submit"
+              class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-4 rounded-lg transition text-lg mt-4 shadow-lg"
+            >
+              ✅ Kirim Kehadiran
+            </button>
+            <p
+              id="submit-info"
+              class="text-center text-sm text-blue-600 mt-2 font-semibold"
+            ></p>
+          </form>
+        </div>
+      </div>
+
+      <!-- HALAMAN ADMIN -->
+      <div id="tab-admin" class="hidden space-y-6">
+        <!-- Setting Jam -->
+        <div
+          class="bg-white p-6 rounded-lg shadow-md border-t-4 border-yellow-400"
+        >
+          <h2 class="text-xl font-bold mb-4">Pengaturan Jam</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label class="block text-sm font-semibold">Jam Masuk</label>
+              <input
+                type="time"
+                id="set-masuk"
+                class="border p-2 rounded w-full bg-gray-50"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold">Batas Telat</label>
+              <input
+                type="time"
+                id="set-telat"
+                class="border p-2 rounded w-full bg-gray-50"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold">Jam Pulang</label>
+              <input
+                type="time"
+                id="set-pulang"
+                class="border p-2 rounded w-full bg-gray-50"
+              />
+            </div>
+          </div>
+          <button
+            onclick="
+              localStorage.setItem(
+                'jamMasuk',
+                document.getElementById('set-masuk').value,
+              );
+              localStorage.setItem(
+                'batasTelat',
+                document.getElementById('set-telat').value,
+              );
+              localStorage.setItem(
+                'jamPulang',
+                document.getElementById('set-pulang').value,
+              );
+              alert('Pengaturan Jam Berhasil Disimpan!');
+            "
+            class="w-full bg-yellow-500 text-white px-4 py-3 rounded font-bold hover:bg-yellow-600 shadow transition"
+          >
+            Simpan Aturan Jam
+          </button>
+        </div>
+
+        <!-- Akses Rekap Excel -->
+        <div
+          class="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-500 text-center"
+        >
+          <h2 class="text-xl font-bold mb-2">Database Rekapan</h2>
+          <p class="text-gray-600 mb-4">
+            Seluruh data absensi guru otomatis masuk ke Google Sheets.
+          </p>
+          <a
+            href="https://sheets.google.com"
+            target="_blank"
+            class="inline-block w-full bg-blue-600 text-white px-6 py-3 rounded font-bold hover:bg-blue-700 shadow transition"
+          >
+            Buka Google Sheets Admin
+          </a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
